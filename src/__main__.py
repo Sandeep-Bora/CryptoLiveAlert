@@ -52,7 +52,10 @@ if __name__ == "__main__":
     taapiio_process = None
     if getenv("TAAPIIO_APIKEY"):
         # Create global Taapi.io process for the aggregator and telegram bot to sync calls
-        taapiio_process = TaapiioProcess(taapiio_apikey=getenv("TAAPIIO_APIKEY"))
+        taapiio_process = TaapiioProcess(
+            taapiio_apikey=getenv("TAAPIIO_APIKEY"),
+            telegram_bot_token=getenv("TELEGRAM_BOT_TOKEN"),
+        )
 
     # Create the Telegram bot to listen to commands and send messages
     telegram_bot = TelegramBot(

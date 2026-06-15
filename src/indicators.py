@@ -303,6 +303,7 @@ class TaapiioProcess:
                 sleep(0.1)  # To prevent excessive spamming
                 continue
 
+            rate_limited = False
             for symbol, intervals in aggregate.items():
                 for interval, indicators in intervals.items():
                     num_indicators += len(indicators)  # For logging
@@ -326,9 +327,14 @@ class TaapiioProcess:
                     # print("TAAPI.IO RESPONSE:", r)
                     try:
                         responses = r["data"]
-                    except KeyError:
-                        # if "error" in r.keys():
-                        #     logger.warn(f"Taapio error occurred when building aggregate: {r['error']}")
+                    except (KeyError, TypeError):
+                        # Back off gracefully on rate-limit errors instead of crashing the whole process
+                        error_msg = (
+                            str(r.get("error", "")) if isinstance(r, dict) else str(r)
+                        )
+                        if "rate-limit" in error_msg.lower() or "rate limit" in error_msg.lower():
+                            rate_limited = True
+                            break
                         raise Exception(f"Error occurred calling taapi.io API - {r}")
 
                     # Assign returned values and update aggregate:
@@ -340,6 +346,19 @@ class TaapiioProcess:
                                 "result"
                             ][output_variable]
                         indicators[i]["last_update"] = int(time())
+
+                if rate_limited:
+                    break
+
+            if rate_limited:
+                backoff = round(get_ratelimits()[1] * (1 + REQUEST_BUFFER), 1)
+                logger.warning(
+                    f"Taapi.io rate limit hit - backing off {backoff}s before retrying. "
+                    f"If this persists, make sure this TAAPI.IO API key is not being used by "
+                    f"another running instance of the bot (e.g. running locally AND on Render)."
+                )
+                sleep(backoff)
+                continue
 
             # 3. Dump aggregate with updated values so that the alerts client can reference it
             self.agg_cli.dump_agg(aggregate)
