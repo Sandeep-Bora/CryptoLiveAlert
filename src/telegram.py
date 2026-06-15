@@ -92,16 +92,19 @@ class TelegramBot(TeleBot):
                         "Attempting to verify parameters with taapi.io and add alert to database...",
                     )
 
-                    # Verify accurate formatting:
-                    (
-                        pair,
-                        indicator,
-                        interval,
-                        params,
-                        output_value,
-                        comparison,
-                        target,
-                    ) = msg
+                    # Verify accurate formatting (cooldown is optional 8th arg, handled later)
+                    if len(msg) < 7:
+                        raise ValueError(
+                            "Technical alerts require 7 arguments before optional cooldown: "
+                            "PAIR INDICATOR TIMEFRAME PARAMS OUTPUT_VALUE COMPARISON TARGET"
+                        )
+                    pair = msg[0]
+                    indicator = msg[1]
+                    interval = msg[2]
+                    params = msg[3]
+                    output_value = msg[4]
+                    comparison = msg[5]
+                    target = msg[6]
 
                     # Verify indicator:
                     indicator_instance = self.parse_technical_indicator_message(
