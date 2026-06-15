@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: telegram-crypto-alerts
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m src
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      # Set the secret values below in the Render dashboard (Environment tab).
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_USER_ID
+        sync: false
+      - key: TAAPIIO_APIKEY
+        sync: false
+      - key: LOCATION
+        value: us
+      - key: TAAPIIO_TIER
+        value: free
