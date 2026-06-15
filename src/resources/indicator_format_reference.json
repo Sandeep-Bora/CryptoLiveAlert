@@ -113,5 +113,27 @@
       "valueMACDHist"
     ],
     "type": "t"
+  },
+  "SUPERTREND": {
+    "name": "Supertrend",
+    "endpoint": "https://api.taapi.io/supertrend?secret={api_key}&exchange=binance",
+    "ref": "https://taapi.io/indicators/supertrend/",
+    "params": [
+      [
+        "period",
+        "Number of candles used to calculate the ATR. Shorter = more reactive",
+        7
+      ],
+      [
+        "multiplier",
+        "ATR multiplier. Higher = wider bands / less sensitive",
+        3
+      ]
+    ],
+    "output": [
+      "value",
+      "valueAdvice"
+    ],
+    "type": "t"
   }
 }

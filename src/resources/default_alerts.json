@@ -1,49 +1,28 @@
 {
-  "ETH/USDT": [
+  "BTC/USDT": [
     {
-      "type": "s",
-      "indicator": "PRICE",
-      "comparison": "ABOVE",
-      "target": 1500,
+      "type": "t",
+      "indicator": "SUPERTREND",
+      "comparison": "EQUALS",
+      "interval": "1h",
       "params": {},
+      "output_value": "valueAdvice",
+      "target": "long",
       "trigger": {
-        "cooldown_seconds": null,
-        "last_triggered": 0
-      }
-    },
-    {
-      "type": "s",
-      "indicator": "PRICE",
-      "comparison": "BELOW",
-      "target": 1,
-      "params": {},
-      "trigger": {
-        "cooldown_seconds": null,
-        "last_triggered": 0
-      }
-    },
-    {
-      "type": "s",
-      "indicator": "PRICE",
-      "comparison": "PCTCHG",
-      "entry": 2000,
-      "target": 10.0,
-      "params": {},
-      "trigger": {
-        "cooldown_seconds": 300,
+        "cooldown_seconds": 3600,
         "last_triggered": 0
       }
     },
     {
       "type": "t",
-      "indicator": "MA",
-      "comparison": "ABOVE",
-      "interval": "1d",
-      "params": {"period": 30},
-      "output_value": "value",
-      "target": 1000.00,
+      "indicator": "SUPERTREND",
+      "comparison": "EQUALS",
+      "interval": "1h",
+      "params": {},
+      "output_value": "valueAdvice",
+      "target": "short",
       "trigger": {
-        "cooldown_seconds": null,
+        "cooldown_seconds": 3600,
         "last_triggered": 0
       }
     }

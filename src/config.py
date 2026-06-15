@@ -8,6 +8,8 @@ TECHNICAL_POLLING_PERIOD = 5  # Delay for the technical alert handler check tech
 OUTPUT_VALUE_PRECISION = 3
 SIMPLE_INDICATORS = ["PRICE"]
 SIMPLE_INDICATOR_COMPARISONS = ["ABOVE", "BELOW", "PCTCHG", "24HRCHG"]
+# ABOVE/BELOW are numeric; EQUALS is for string outputs (e.g. SuperTrend valueAdvice: long/short)
+TECHNICAL_INDICATOR_COMPARISONS = ["ABOVE", "BELOW", "EQUALS"]
 
 """Telegram Handler Configuration"""
 MAX_ALERTS_PER_USER = (

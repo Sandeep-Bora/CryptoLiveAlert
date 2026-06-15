@@ -149,7 +149,11 @@ class TechnicalAlertProcess(BaseAlertProcess):
             return null_output
 
         satisfied = False
-        if alert["comparison"] == "ABOVE":
+        if alert["comparison"] == "EQUALS":
+            # String/value equality for non-numeric outputs (e.g. SuperTrend valueAdvice: long/short)
+            if str(value).strip().lower() == str(alert["target"]).strip().lower():
+                satisfied = True
+        elif alert["comparison"] == "ABOVE":
             if value > alert["target"]:
                 satisfied = True
         elif alert["comparison"] == "BELOW":
@@ -157,7 +161,7 @@ class TechnicalAlertProcess(BaseAlertProcess):
                 satisfied = True
         else:
             raise ValueError(
-                f"'{alert['comparison']}' IS AN INVALID COMPARISON TYPE (ABOVE OR BELOW)"
+                f"'{alert['comparison']}' IS AN INVALID COMPARISON TYPE (ABOVE, BELOW, or EQUALS)"
             )
 
         # Return
@@ -166,9 +170,14 @@ class TechnicalAlertProcess(BaseAlertProcess):
             params_str = ", ".join(
                 [f"{param.upper()}={v}" for param, v in alert["params"].items()]
             )
+            # Numeric outputs get rounded; string outputs (e.g. long/short) are shown as-is
+            try:
+                value_display = f"{value:.{OUTPUT_VALUE_PRECISION}f}"
+            except (ValueError, TypeError):
+                value_display = str(value)
             post_str = (
                 f"{pair} {indicator_str} {alert['interval']} {params_str} {alert['comparison']} {alert['target']}"
-                f" AT {value:.{OUTPUT_VALUE_PRECISION}f}\n"
+                f" AT {value_display}\n"
             )
             return True, value, post_str
         else:

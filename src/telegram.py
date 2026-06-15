@@ -204,7 +204,20 @@ class TelegramBot(TeleBot):
                     # Handle technical indicator:
                     output_value = msg[4]
                     comparison = msg[5].upper()
-                    target = float(msg[6])
+                    if comparison not in TECHNICAL_INDICATOR_COMPARISONS:
+                        raise ValueError(
+                            f"{comparison} is an invalid technical indicator comparison operator.\n"
+                            f"Options: {TECHNICAL_INDICATOR_COMPARISONS}"
+                        )
+                    # ABOVE/BELOW require a numeric target; EQUALS allows a string (e.g. SuperTrend long/short)
+                    try:
+                        target = float(msg[6])
+                    except ValueError:
+                        if comparison != "EQUALS":
+                            raise ValueError(
+                                f"'{msg[6]}' is not a valid numeric target for {comparison}."
+                            )
+                        target = msg[6]
                     trigger = parse_trigger_cooldown(msg[7] if len(msg) > 7 else None)
                     alert = {
                         "type": indicator_instance.type,
