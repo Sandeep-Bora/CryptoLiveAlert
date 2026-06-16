@@ -1,6 +1,6 @@
 help - Returns a link to the documentation
 id - Get your Telegram user ID
-new_alert - Usage: Variable by indicator type. See docs (/help)
+new_alert - Send /new_alert help for timeframe list and exact examples per indicator
 cancel_alert - Usage: /cancel_alert TOKEN/TOKEN alert_index
 indicators - Usage: /indicators
 view_alerts - Usage: /view_alerts TOKEN/TOKEN (or leave blank for all)

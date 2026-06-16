@@ -15,6 +15,7 @@ from .utils import (
     get_commands,
     get_binance_price_url,
     parse_trigger_cooldown,
+    build_new_alert_guide,
 )
 from .config import *
 from .indicators import TADatabaseClient, TaapiioProcess
@@ -70,6 +71,16 @@ class TelegramBot(TeleBot):
             technical_indicators = list(self.indicators_db.keys())
             try:
                 msg = self.split_message(message.text)
+                if len(msg) == 0 or msg[0].lower() in ("help", "examples", "?"):
+                    for chunk in build_new_alert_guide(self.indicators_db):
+                        self.reply_to(
+                            message,
+                            chunk,
+                            parse_mode="HTML",
+                            disable_web_page_preview=True,
+                        )
+                    return
+
                 indicator = msg[1].upper()
                 if indicator in simple_indicators:
                     # Verify accurate formatting:
@@ -401,6 +412,12 @@ class TelegramBot(TeleBot):
 
             # Build technical indicators reference:
             output += "\n<u><b>Technical Indicators:</b></u>\n"
+            output += (
+                f"   • <u>Supported timeframes:</u> "
+                f"{', '.join(INTERVALS)} "
+                f"(longest: 1w — no 1-month on taapi.io)\n"
+                f"   • Send <code>/new_alert help</code> for exact copy-paste examples\n\n"
+            )
             for indicator, data in self.indicators_db.items():
                 output += (
                     f"<a href='{data['ref']}'><b>{indicator}</b></a> ({data['name']}):\n"
@@ -766,6 +783,11 @@ class TelegramBot(TeleBot):
         pair = splt_msg[0]
         indicator_id = splt_msg[1].upper()
         interval = splt_msg[2].lower()
+        assert interval in INTERVALS, (
+            f"'{interval}' is not a supported timeframe.\n"
+            f"Options: {', '.join(INTERVALS)}\n"
+            f"Note: taapi.io max is 1w (no 1-month candle)."
+        )
         try:
             args = splt_msg[3]
             if args.lower() == "default":

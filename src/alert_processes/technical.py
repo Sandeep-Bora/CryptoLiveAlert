@@ -55,17 +55,16 @@ class TechnicalAlertProcess(BaseAlertProcess):
                         last_trigger = alert.get("trigger", {}).get("last_triggered", 0)
                         if int(time.time()) > last_trigger + (cooldown or 0):
                             post_queue.append((post_string, pair))
+                            alert["trigger"] = {
+                                "cooldown_seconds": cooldown,
+                                "last_triggered": int(time.time()),
+                            }
+                            do_update = True
 
-                        current_time = int(time.time())
-                        alert["trigger"] = {
-                            "cooldown_seconds": cooldown,
-                            "last_triggered": current_time,
-                        }
-                        if not alert["trigger"]["cooldown_seconds"]:
-                            # If the alert has no cooldown setting, remove it
+                        if not alert.get("trigger", {}).get("cooldown_seconds"):
+                            # If the alert has no cooldown setting, remove after one trigger
                             remove_queue.append(alert)
-
-                        do_update = True  # Since the alert needs to be updated in the database, signal do_update
+                            do_update = True
 
             for item in remove_queue:
                 alerts_database[pair].remove(item)
@@ -119,10 +118,18 @@ class TechnicalAlertProcess(BaseAlertProcess):
         null_output = False, 0, ""
 
         aggregate = self.ta_agg_cli.load_agg()
-        if aggregate == {}:
+        if not aggregate:
             logger.warn(
                 "Attempted to load the aggregate in get_technical_indicator() but it was empty"
             )
+            return null_output
+
+        pair_data = aggregate.get(pair)
+        if not pair_data:
+            return null_output
+
+        interval_data = pair_data.get(alert["interval"])
+        if not interval_data:
             return null_output
 
         # Match the alert to its corresponding reference in the aggregate and check the value:
@@ -130,7 +137,7 @@ class TechnicalAlertProcess(BaseAlertProcess):
         formatted_alert = self.ta_agg_cli.format_alert_for_match(alert)
 
         # Attempt to find an existing indicator match for the alert
-        for indicator in aggregate[pair][alert["interval"]]:
+        for indicator in interval_data:
             try:
                 if all(indicator[k] == v for k, v in formatted_alert.items()):
                     matched_indicator = indicator
@@ -139,9 +146,11 @@ class TechnicalAlertProcess(BaseAlertProcess):
                 continue
 
         if matched_indicator is None:
-            raise ValueError(
-                f"Could not match alert to indicator in the TA aggregate - Alert: {alert}"
+            logger.warn(
+                f"No aggregate match yet for {pair} {alert['indicator']} "
+                f"{alert['interval']} — waiting for next taapi.io update"
             )
+            return null_output
 
         # If these tests pass, this is the correct indicator because the symbol, interval, and params pass
         value = matched_indicator["values"][alert["output_value"]]
@@ -214,20 +223,20 @@ class TechnicalAlertProcess(BaseAlertProcess):
         return output
 
     def run(self):
-        try:
-            logger.warn(f"{type(self).__name__} started at {datetime.utcnow()} UTC+0")
-            while True:
+        logger.warn(f"{type(self).__name__} started at {datetime.utcnow()} UTC+0")
+        while True:
+            try:
                 self.poll_all_alerts()
                 time.sleep(TECHNICAL_POLLING_PERIOD)
-        except NotImplementedError as exc:
-            logger.critical(exc_info=exc)
-            # self.alert_admins(str(exc))
-        except KeyboardInterrupt:
-            logger.critical("KeyboardInterrupt detected. Exiting...")
-            exit(0)
-        except Exception as exc:
-            logger.critical(
-                "An error has occurred in the technical alerts process. Trying again in 15 seconds...",
-                exc_info=exc,
-            )
-            time.sleep(15)
+            except NotImplementedError as exc:
+                logger.critical(exc_info=exc)
+                break
+            except KeyboardInterrupt:
+                logger.critical("KeyboardInterrupt detected. Exiting...")
+                exit(0)
+            except Exception as exc:
+                logger.critical(
+                    "An error has occurred in the technical alerts process. Trying again in 15 seconds...",
+                    exc_info=exc,
+                )
+                time.sleep(15)

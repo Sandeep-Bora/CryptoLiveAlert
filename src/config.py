@@ -37,7 +37,8 @@ TA_DB_PATH = join(
 AGG_DATA_LOCATION = join(dirname(abspath(__file__)), "temp/ta_aggregate.json")
 
 """TAAPI.IO"""
-INTERVALS = ["1m", "5m", "15m", "30m", "1h", "2h", "4h", "12h", "1d", "1w"]
+# taapi.io supported intervals (1m = shortest, 1w = longest; no 1-month candle on the API)
+INTERVALS = ["1m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "1w"]
 DEFAULT_EXCHANGE = "binance"
 BULK_ENDPOINT = "https://api.taapi.io/bulk"
 SUBSCRIPTION_TIERS = {

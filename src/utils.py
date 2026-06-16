@@ -102,3 +102,75 @@ def parse_trigger_cooldown(cooldown_str: str = None) -> dict:
         "cooldown_seconds": max(value * unit_multipliers[unit], 5),
         "last_triggered": 0,
     }
+
+
+def _indicator_alert_examples(indicator_id: str, data: dict) -> list[tuple[str, str, str]]:
+    """Return (output_value, comparison, target) tuples for copy-paste /new_alert examples."""
+    if indicator_id == "SUPERTREND":
+        return [("valueAdvice", "EQUALS", "long"), ("valueAdvice", "EQUALS", "short")]
+    if indicator_id == "RSI":
+        return [("value", "ABOVE", "70"), ("value", "BELOW", "30")]
+    if indicator_id == "BBANDS":
+        return [
+            ("valueUpperBand", "ABOVE", "50000"),
+            ("valueLowerBand", "BELOW", "40000"),
+        ]
+    if indicator_id == "MACD":
+        return [("valueMACD", "ABOVE", "0"), ("valueMACDHist", "BELOW", "0")]
+    primary = data["output"][0]
+    return [(primary, "ABOVE", "50000")]
+
+
+def build_new_alert_guide(indicators_db: dict, example_interval: str = "1h") -> list[str]:
+    """
+    Build HTML messages listing supported timeframes and exact /new_alert examples
+    for every bundled indicator. Splits into multiple messages if over Telegram's limit.
+    """
+    if example_interval not in INTERVALS:
+        example_interval = "1h"
+
+    intervals_line = ", ".join(f"<code>{i}</code>" for i in INTERVALS)
+    header = (
+        "<b>/new_alert — command guide</b>\n\n"
+        "<b>Supported timeframes:</b>\n"
+        f"{intervals_line}\n"
+        "<i>Shortest: 1m · Longest: 1w (taapi.io has no 1-month candle — use 1w)</i>\n\n"
+        "<b>Simple (price) format:</b>\n"
+        "<code>/new_alert PAIR/PAIR INDICATOR COMPARISON TARGET [COOLDOWN]</code>\n"
+        f"Comparisons: {', '.join(SIMPLE_INDICATOR_COMPARISONS)}\n\n"
+        "<b>Examples — simple:</b>\n"
+        "<code>/new_alert BTC/USDT PRICE ABOVE 100000 1h</code>\n"
+        "<code>/new_alert BTC/USDT PRICE BELOW 90000 1h</code>\n"
+        "<code>/new_alert BTC/USDT PRICE PCTCHG 10 95000 1h</code>\n\n"
+        "<b>Technical format:</b>\n"
+        "<code>/new_alert PAIR INDICATOR TIMEFRAME PARAMS OUTPUT_VALUE COMPARISON TARGET [COOLDOWN]</code>\n"
+        f"Comparisons: {', '.join(TECHNICAL_INDICATOR_COMPARISONS)}\n"
+        "<code>PARAMS</code> = <code>default</code> or e.g. <code>period=14,multiplier=3</code>\n\n"
+        "<b>Examples — technical (swap TIMEFRAME for any supported interval):</b>\n"
+    )
+
+    chunks: list[str] = [header]
+    for indicator_id, data in sorted(indicators_db.items()):
+        block = f"\n<b>{indicator_id}</b> ({data['name']}):\n"
+        for output_value, comparison, target in _indicator_alert_examples(
+            indicator_id, data
+        ):
+            block += (
+                f"<code>/new_alert BTC/USDT {indicator_id} {example_interval} "
+                f"default {output_value} {comparison} {target} {example_interval}</code>\n"
+            )
+        other_outputs = [
+            o
+            for o in data["output"]
+            if o not in {e[0] for e in _indicator_alert_examples(indicator_id, data)}
+        ]
+        if other_outputs:
+            block += f"   Other outputs: {', '.join(other_outputs)}\n"
+
+        if len(chunks[-1]) + len(block) > 3900:
+            chunks.append(block)
+        else:
+            chunks[-1] += block
+
+    chunks[-1] += "\n<i>Tip: send</i> <code>/new_alert help</code> <i>anytime for this guide.</i>"
+    return chunks
