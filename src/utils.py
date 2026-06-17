@@ -104,6 +104,23 @@ def parse_trigger_cooldown(cooldown_str: str = None) -> dict:
     }
 
 
+def strip_html(text: str) -> str:
+    """Convert Telegram HTML alert text to plain text for ntfy."""
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"</?b>", "", text, flags=re.IGNORECASE)
+    text = re.sub(
+        r"<a href=['\"]([^'\"]+)['\"][^>]*>([^<]+)</a>",
+        r"\2: \1",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"<[^>]+>", "", text)
+    return text.strip()
+
+
+strip_html_for_plain = strip_html
+
+
 def _indicator_alert_examples(indicator_id: str, data: dict) -> list[tuple[str, str, str]]:
     """Return (output_value, comparison, target) tuples for copy-paste /new_alert examples."""
     if indicator_id == "SUPERTREND":
@@ -174,6 +191,3 @@ def build_new_alert_guide(indicators_db: dict, example_interval: str = "1h") -> 
 
     chunks[-1] += "\n<i>Tip: send</i> <code>/new_alert help</code> <i>anytime for this guide.</i>"
     return chunks
-
-
-from .notifications import strip_html as strip_html_for_plain

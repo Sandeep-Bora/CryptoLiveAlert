@@ -1,23 +1,9 @@
-import re
 from os import getenv
 
 import requests
 
 from .logger import logger
-
-
-def strip_html(text: str) -> str:
-    """Convert Telegram HTML alert text to plain text for ntfy."""
-    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
-    text = re.sub(r"</?b>", "", text, flags=re.IGNORECASE)
-    text = re.sub(
-        r"<a href=['\"]([^'\"]+)['\"][^>]*>([^<]+)</a>",
-        r"\2: \1",
-        text,
-        flags=re.IGNORECASE,
-    )
-    text = re.sub(r"<[^>]+>", "", text)
-    return text.strip()
+from .utils import strip_html
 
 
 def send_ntfy(
