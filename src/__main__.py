@@ -10,6 +10,7 @@ from .utils import handle_env
 from .indicators import TaapiioProcess
 from .logger import logger
 from .setup import do_setup
+from .ntfy_commands import start_ntfy_command_listener
 
 
 class _HealthCheckHandler(BaseHTTPRequestHandler):
@@ -64,6 +65,9 @@ if __name__ == "__main__":
 
     # Run the TG bot in a daemon thread
     threading.Thread(target=telegram_bot.run, daemon=True).start()
+
+    # Listen for alert commands published to ntfy (new_alert, cancel_alert, view_alerts)
+    start_ntfy_command_listener(telegram_bot)
 
     # Run the CEXAlertProcess in a daemon thread
     threading.Thread(

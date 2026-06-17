@@ -174,3 +174,6 @@ def build_new_alert_guide(indicators_db: dict, example_interval: str = "1h") -> 
 
     chunks[-1] += "\n<i>Tip: send</i> <code>/new_alert help</code> <i>anytime for this guide.</i>"
     return chunks
+
+
+from .notifications import strip_html as strip_html_for_plain

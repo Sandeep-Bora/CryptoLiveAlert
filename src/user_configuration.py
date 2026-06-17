@@ -1,5 +1,6 @@
 import json
 import shutil
+from os import getenv
 
 from .config import *
 from .mongo import MongoDBConnection
@@ -40,6 +41,9 @@ class LocalUserConfiguration:
             with open(self.default_config_path, "r") as _in:
                 default_config = json.loads(_in.read())
             default_config["channels"].append(self.user_id)
+            ntfy_topic = getenv("NTFY_TOPIC")
+            if ntfy_topic and ntfy_topic not in default_config.get("ntfy_topics", []):
+                default_config.setdefault("ntfy_topics", []).append(ntfy_topic)
             if is_admin:
                 default_config["is_admin"] = True
             with open(self.config_path, "w") as _out:
@@ -105,6 +109,36 @@ class LocalUserConfiguration:
         self.update_config(config)
         return fail
 
+    def get_ntfy_topics(self) -> list[str]:
+        config = self.load_config()
+        topics = list(config.get("ntfy_topics", []))
+        env_topic = getenv("NTFY_TOPIC")
+        if env_topic and env_topic not in topics:
+            topics.append(env_topic)
+        return topics
+
+    def add_ntfy_topics(self, topics: list[str]) -> None:
+        config = self.load_config()
+        config.setdefault("ntfy_topics", [])
+        for topic in topics:
+            topic = topic.strip()
+            if topic and topic not in config["ntfy_topics"]:
+                config["ntfy_topics"].append(topic)
+        self.update_config(config)
+
+    def remove_ntfy_topics(self, topics: list[str]) -> list[str]:
+        config = self.load_config()
+        config.setdefault("ntfy_topics", [])
+        fail = []
+        for topic in topics:
+            topic = topic.strip()
+            if topic in config["ntfy_topics"]:
+                config["ntfy_topics"].remove(topic)
+            else:
+                fail.append(topic)
+        self.update_config(config)
+        return fail
+
 
 class MongoDBUserConfiguration(LocalUserConfiguration):
     """Simplifies interaction with the MongoDB NoSQL database system - overrides methods from class above"""
@@ -133,6 +167,9 @@ class MongoDBUserConfiguration(LocalUserConfiguration):
             with open(self.default_config_path, "r") as _in:
                 default_config = json.loads(_in.read())
             default_config["channels"].append(self.user_id)
+            ntfy_topic = getenv("NTFY_TOPIC")
+            if ntfy_topic and ntfy_topic not in default_config.get("ntfy_topics", []):
+                default_config.setdefault("ntfy_topics", []).append(ntfy_topic)
             if is_admin:
                 default_config["is_admin"] = True
             user_document["config"] = default_config

@@ -14,9 +14,10 @@ from .utils import (
     get_help_command,
     get_commands,
     get_binance_price_url,
-    parse_trigger_cooldown,
     build_new_alert_guide,
 )
+from .alert_commands import AlertCommandHandler
+from .ntfy_commands import get_ntfy_command_topic
 from .config import *
 from .indicators import TADatabaseClient, TaapiioProcess
 from .models import TechnicalAlert, CEXAlert
@@ -66,266 +67,36 @@ class TelegramBot(TeleBot):
         @self.message_handler(commands=["new_alert", "newalert"])
         @self.is_whitelisted
         def on_new_alert(message):
-            """/new_alert PAIR/PAIR INDICATOR TARGET optional_COOLDOWN"""
-            simple_indicators = ["PRICE", "24HRCHG"]
-            technical_indicators = list(self.indicators_db.keys())
-            try:
-                msg = self.split_message(message.text)
-                if len(msg) == 0 or msg[0].lower() in ("help", "examples", "?"):
-                    for chunk in build_new_alert_guide(self.indicators_db):
-                        self.reply_to(
-                            message,
-                            chunk,
-                            parse_mode="HTML",
-                            disable_web_page_preview=True,
-                        )
-                    return
-
-                indicator = msg[1].upper()
-                if indicator in simple_indicators:
-                    # Verify accurate formatting:
-                    pair, indicator, comparison, target = msg[0], msg[1], msg[2], msg[3]
-
-                    indicator_instance = self.parse_simple_indicator_message(
-                        message.text
-                    )
-                elif indicator in technical_indicators:
-                    if self.taapiio_cli is None:
-                        self.reply_to(
-                            message,
-                            "Technical alerts are currently unavailable. Set the environment variable `TAAPIIO_APIKEY` to enable.",
-                            parse_mode="Markdown",
-                        )
-                        return
-
+            msg = self.split_message(message.text)
+            if len(msg) == 0 or msg[0].lower() in ("help", "examples", "?"):
+                for chunk in build_new_alert_guide(self.indicators_db):
                     self.reply_to(
                         message,
-                        "Attempting to verify parameters with taapi.io and add alert to database...",
+                        chunk,
+                        parse_mode="HTML",
+                        disable_web_page_preview=True,
                     )
-
-                    # Verify accurate formatting (cooldown is optional 8th arg, handled later)
-                    if len(msg) < 7:
-                        raise ValueError(
-                            "Technical alerts require 7 arguments before optional cooldown: "
-                            "PAIR INDICATOR TIMEFRAME PARAMS OUTPUT_VALUE COMPARISON TARGET"
-                        )
-                    pair = msg[0]
-                    indicator = msg[1]
-                    interval = msg[2]
-                    params = msg[3]
-                    output_value = msg[4]
-                    comparison = msg[5]
-                    target = msg[6]
-
-                    # Verify indicator:
-                    indicator_instance = self.parse_technical_indicator_message(
-                        message.text
-                    )
-                    if indicator_instance is None:
-                        self.reply_to(
-                            message,
-                            "Could not match passed parameters to valid technical indicator in the database.\n"
-                            "Please check your formatting with `/indicators`",
-                            parse_mode="Markdown",
-                        )
-                        return
-
-                    # Verify that no errors are returned by the indicator on taapi.io:
-                    try:
-                        r = self.get_technical_indicator(indicator_instance)
-                        if output_value not in r.keys():
-                            self.reply_to(
-                                message, f"Invalid output value - Options: {r.keys()}"
-                            )
-                            return
-                    except Exception as exc:
-                        self.reply_to(
-                            message,
-                            f"Database match found, but an error occurred with taapi.io:\n"
-                            f"{str(exc)}\n"
-                            f"The parameters passed were most likely invalid.",
-                        )
-                        return
-                else:
-                    self.reply_to(
-                        message,
-                        f"Invalid indicator. Valid indicators: {simple_indicators + technical_indicators}",
-                    )
-                    return
-
-            except AssertionError as exc:
-                self.reply_to(
-                    message, "<b>Assertion Error:</b>\n" f"{exc}", parse_mode="HTML"
-                )
                 return
-            except Exception as exc:
-                self.reply_to(
-                    message,
-                    "Invalid message formatting.\n"
-                    "Please verify that your request follows the format corresponding to your desired indicator type:\n"
-                    "\n<b>Simple Indicator:</b>\n"
-                    "/new_alert PAIR/PAIR INDICATOR COMPARISON TARGET optional_COOLDOWN\n"
-                    "\n<b>Technical Indicator:</b>\n"
-                    "/new_alert BASE/QUOTE INDICATOR TIMEFRAME PARAMS OUTPUT_VALUE COMPARISON TARGET optional_COOLDOWN\n"
-                    "\nUse the /help command for more information on command formatting.",
-                    parse_mode="HTML",
-                )
-                return
-
-            try:
-                configuration = BaseConfig(str(message.from_user.id))
-                alerts_db = configuration.load_alerts()
-
-                if MAX_ALERTS_PER_USER is not None:
-                    if (
-                        sum(len(alerts) for alerts in alerts_db.values())
-                        >= MAX_ALERTS_PER_USER
-                    ):
-                        raise OverflowError(
-                            f"Maximum active alerts reached ({MAX_ALERTS_PER_USER})"
-                        )
-
-                if indicator_instance.type == "s":
-                    # Handle simple indicator:
-                    comparison = msg[2].upper()
-                    target = (
-                        float(msg[3].strip())
-                        if comparison not in ["PCTCHG", "24HRCHG"]
-                        else float(msg[3].strip()) / 100
-                    )
-                    try:
-                        entry_price = self.get_latest_binance_price(pair)
-                    except Exception as exc:
-                        self.reply_to(
-                            message,
-                            f"{str(exc)}\n"
-                            "Please verify that your pair is listed on binance and follows the "
-                            "format: TOKEN1/TOKEN2",
-                        )
-                        return
-                    trigger = parse_trigger_cooldown(msg[4] if len(msg) > 4 else None)
-
-                    alert = {
-                        "type": indicator_instance.type,
-                        "indicator": indicator_instance.indicator.upper(),
-                        "comparison": comparison,
-                        "entry": entry_price,
-                        "target": target,
-                        "params": indicator_instance.params,
-                        "trigger": trigger,
-                    }
-                else:
-                    # Handle technical indicator:
-                    output_value = msg[4]
-                    comparison = msg[5].upper()
-                    if comparison not in TECHNICAL_INDICATOR_COMPARISONS:
-                        raise ValueError(
-                            f"{comparison} is an invalid technical indicator comparison operator.\n"
-                            f"Options: {TECHNICAL_INDICATOR_COMPARISONS}"
-                        )
-                    # ABOVE/BELOW require a numeric target; EQUALS allows a string (e.g. SuperTrend long/short)
-                    try:
-                        target = float(msg[6])
-                    except ValueError:
-                        if comparison != "EQUALS":
-                            raise ValueError(
-                                f"'{msg[6]}' is not a valid numeric target for {comparison}."
-                            )
-                        target = msg[6]
-                    trigger = parse_trigger_cooldown(msg[7] if len(msg) > 7 else None)
-                    alert = {
-                        "type": indicator_instance.type,
-                        "indicator": indicator_instance.indicator.upper(),
-                        "comparison": comparison,
-                        "interval": indicator_instance.interval,
-                        "params": indicator_instance.params,
-                        "output_value": output_value,
-                        "target": target,
-                        "trigger": trigger,
-                    }
-
-                if pair in alerts_db.keys():
-                    alerts_db[pair].append(alert)
-                else:
-                    alerts_db[pair] = [alert]
-                configuration.update_alerts(alerts_db)
-                self.reply_to(message, f"Successfully activated new alert!")
-            except Exception as exc:
-                self.reply_to(message, f"An error occurred:\n{exc}")
-                return
+            result = AlertCommandHandler(self).process_new_alert(
+                str(message.from_user.id), message.text
+            )
+            self.reply_to(message, result)
 
         @self.message_handler(commands=["cancel_alert", "cancelalert"])
         @self.is_whitelisted
         def on_cancel_alert(message):
-            """/cancel_alert PAIR/PAIR alert_index"""
-            try:
-                pair, alert_index = self.split_message(message.text)
-                pair = pair.upper()
-                alert_index = int(alert_index)
-            except Exception as exc:
-                self.reply_to(
-                    message,
-                    f"Invalid message formatting. Please ensure that your message follows this format:\n"
-                    f"/cancel_alert TOKEN1/TOKEN2 alert_index",
-                )
-                return
-
-            try:
-                configuration = BaseConfig(str(message.from_user.id))
-                alerts_db = configuration.load_alerts()
-                rm_alert = alerts_db[pair].pop(alert_index - 1)
-                all_rm = False
-                if len(alerts_db[pair]) == 0:
-                    rm_pair = alerts_db.pop(pair)
-                    all_rm = True
-                configuration.update_alerts(alerts_db)
-                self.reply_to(
-                    message,
-                    f"Successfully Canceled {pair} Alert:\n"
-                    f'{rm_alert}{f" (All alerts canceled for {pair})" if all_rm else ""}',
-                )
-            except Exception as exc:
-                self.reply_to(
-                    message,
-                    f"An error occurred when trying to cancel the alert:\n{exc}",
-                )
+            result = AlertCommandHandler(self).process_cancel_alert(
+                str(message.from_user.id), message.text
+            )
+            self.reply_to(message, result)
 
         @self.message_handler(commands=["view_alerts", "viewalerts"])
         @self.is_whitelisted
         def on_view_alerts(message):
-            """/view_alerts PAIR (<- optional)"""
-            try:
-                alerts_pair = self.split_message(message.text)[0].upper()
-            except IndexError:
-                alerts_pair = "ALL"
-
-            configuration = BaseConfig(str(message.from_user.id))
-            alerts_db = configuration.load_alerts()
-            output = ""
-            for ticker in alerts_db.keys():
-                if ticker == alerts_pair or alerts_pair == "ALL":
-                    output += f"<b>{ticker}:</b>"
-                    for index, alert in enumerate(alerts_db[ticker]):
-                        output += f"\n    {index + 1} - {alert['indicator']} "
-                        if "output_value" in alert.keys():
-                            output += f"({alert['output_value']}) "
-                        if "interval" in alert.keys():
-                            output += f"{alert['interval']} "
-                        output += f"{alert['comparison']} "
-                        output += f"{str(alert['target'] * 100) + '% FROM ' + str(alert['entry']) if alert['comparison'] in ['PCTCHG', '24HRCHG'] else alert['target']} "
-                        if (
-                            "params" in alert.keys()
-                            and alert["params"] is not None
-                            and len(alert["params"]) > 0
-                        ):
-                            output += f"with params: {alert['params']}"
-
-                    output += "\n\n"
-            self.reply_to(
-                message,
-                output if len(output) > 0 else "Found 0 matching alerts.",
-                parse_mode="HTML",
+            result = AlertCommandHandler(self).process_view_alerts(
+                str(message.from_user.id), message.text
             )
+            self.reply_to(message, result)
 
         @self.message_handler(commands=["get_price", "getprice"])
         @self.is_whitelisted
@@ -547,6 +318,66 @@ class TelegramBot(TeleBot):
                 self.reply_to(
                     message,
                     "Invalid formatting - Use /channels VIEW/ADD/REMOVE ID,ID,ID",
+                )
+            except Exception as exc:
+                self.reply_to(message, f"An unexpected error occurred - {exc}")
+
+        @self.message_handler(commands=["ntfy"])
+        @self.is_whitelisted
+        def on_ntfy(message):
+            """Manage ntfy.sh push notification topics (alerts sent alongside Telegram)."""
+            splt_msg = self.split_message(message.text)
+            try:
+                configuration = BaseConfig(str(message.from_user.id))
+                if splt_msg[0].lower() == "add":
+                    new_topics = [t.strip() for t in splt_msg[1].split(",") if t.strip()]
+                    configuration.add_ntfy_topics(new_topics)
+                    self.reply_to(
+                        message,
+                        f"Successfully added ntfy topic(s): {', '.join(new_topics)}\n\n"
+                        f"Subscribe on your phone: install the ntfy app and subscribe to your topic, "
+                        f"or open https://ntfy.sh/{new_topics[0]}",
+                    )
+                elif splt_msg[0].lower() == "remove":
+                    rm_topics = [t.strip() for t in splt_msg[1].split(",") if t.strip()]
+                    fails = configuration.remove_ntfy_topics(rm_topics)
+                    if len(fails) > 0:
+                        self.reply_to(
+                            message, f"Failed to remove ntfy topic(s): {', '.join(fails)}"
+                        )
+                    self.reply_to(
+                        message,
+                        f"Successfully removed ntfy topic(s): "
+                        f"{', '.join([t for t in rm_topics if t not in fails])}",
+                    )
+                else:
+                    topics = configuration.get_ntfy_topics()
+                    if len(topics) == 0:
+                        self.reply_to(
+                            message,
+                            "No ntfy topics registered.\n\n"
+                            "Set env var NTFY_TOPIC on the server, or use:\n"
+                            "/ntfy ADD your-secret-topic-name\n\n"
+                            "Then subscribe in the ntfy app (https://ntfy.sh) using that topic.",
+                        )
+                        return
+
+                    msg = "Current ntfy alert topics:\n\n"
+                    for topic in topics:
+                        msg += f"• {topic}  (https://ntfy.sh/{topic})\n"
+                    cmd_topic = get_ntfy_command_topic()
+                    if cmd_topic:
+                        msg += (
+                            f"\nCommands topic (publish alerts here):\n"
+                            f"• {cmd_topic}  (https://ntfy.sh/{cmd_topic})\n\n"
+                            f"Example:\n"
+                            f"new_alert BTC/USDT SUPERTREND 1h default valueAdvice EQUALS long 1h"
+                        )
+                    self.reply_to(message, msg)
+            except IndexError:
+                self.reply_to(
+                    message,
+                    "Invalid formatting - Use /ntfy VIEW/ADD/REMOVE topic,topic",
                 )
             except Exception as exc:
                 self.reply_to(message, f"An unexpected error occurred - {exc}")

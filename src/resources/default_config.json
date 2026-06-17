@@ -1,5 +1,6 @@
 {
   "settings": {},
   "channels": [],
+  "ntfy_topics": [],
   "is_admin": false
 }

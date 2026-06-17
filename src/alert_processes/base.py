@@ -39,12 +39,15 @@ class BaseAlertProcess(ABC):
         pass
 
     @abstractmethod
-    def tg_alert(self, post: str, channel_ids: list[str], pair: str):
+    def tg_alert(
+        self,
+        post: str,
+        channel_ids: list[str],
+        ntfy_topics: list[str] = None,
+        pair: str = None,
+    ):
         """
-        Sends a Telegram alert to the user.
-
-        Each alert handler needs its own implementation of this method because the output
-        will be different based on the asset/alert type.
+        Sends alerts to Telegram channels and ntfy topics.
         """
         pass
 

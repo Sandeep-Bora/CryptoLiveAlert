@@ -11,4 +11,5 @@ view_config - Usage: /view_config
 set_config - Usage: /setconfig SETTING=VALUE SETTING=VALUE
 emails - Usage: /emails VIEW/ADD/REMOVE email@email.com,email@email.com
 channels - Usage: /channels VIEW/ADD/REMOVE ID,ID,ID
+ntfy - Usage: /ntfy VIEW/ADD/REMOVE topic,topic (push alerts via ntfy.sh)
 admins - Usage: /admins VIEW/ADD/REMOVE ID,ID,ID

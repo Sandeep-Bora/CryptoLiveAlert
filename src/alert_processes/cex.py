@@ -86,7 +86,10 @@ class CEXAlertProcess(BaseAlertProcess):
             for post, pair in post_queue:
                 logger.info(post)
                 status = self.tg_alert(
-                    post=post, channel_ids=config["channels"], pair=pair
+                    post=post,
+                    channel_ids=config["channels"],
+                    ntfy_topics=configuration.get_ntfy_topics(),
+                    pair=pair,
                 )
                 if len(status[1]) > 0:
                     logger.warn(
@@ -232,36 +235,23 @@ class CEXAlertProcess(BaseAlertProcess):
                 time.sleep(retry_delay)
                 return self.get_pct_change(token_pair, window, _try=_try + 1)
 
-    def tg_alert(self, post: str, channel_ids: list[str], pair: str = None) -> tuple:
-        """
-        Sends the post (price alert) to each registered user of the Telegram bot
+    def tg_alert(
+        self,
+        post: str,
+        channel_ids: list[str],
+        ntfy_topics: list[str] = None,
+        pair: str = None,
+    ) -> tuple:
+        from ..notifications import dispatch_alerts
 
-        :param post: A message to send to each registered bot user
-        :param channel_ids: All group ids to send the alert to (self.config_client.load_config()['channels'])
-        :param pair: The binance pair corresponding to the alert (for showing chart)
-
-        :return: Tuple = ([successful group ids], [unsuccessful group ids])
-        """
-        post = f"🔔 <b>CEX ALERT:</b> 🔔\n\n" + post
-        if pair:
-            pair_fmt = pair.replace("/", "_")
-            post += f"\n\n<a href='https://www.binance.com/en/trade/{pair_fmt}?type=spot'><b>View {pair} Chart</b></a>"
-        output = ([], [])
-        for g_id in channel_ids:
-            try:
-                # requests.post(url=f'https://api.telegram.org/bot{self.tg_bot_token}/sendMessage',
-                #               params={'chat_id': g_id, 'text': header_str + post, "parse_mode": "HTML"})
-                self.telegram_bot.send_message(
-                    chat_id=g_id,
-                    text=post,
-                    parse_mode="HTML",
-                    disable_web_page_preview=True,
-                )
-                output[0].append(g_id)
-            except:
-                output[1].append(g_id)
-
-        return output
+        return dispatch_alerts(
+            telegram_bot=self.telegram_bot,
+            post=post,
+            channel_ids=channel_ids,
+            ntfy_topics=ntfy_topics or [],
+            pair=pair,
+            header="CEX ALERT",
+        )
 
     def run(self):
         """

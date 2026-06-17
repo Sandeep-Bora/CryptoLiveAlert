@@ -19,3 +19,10 @@ services:
         value: us
       - key: TAAPIIO_TIER
         value: free
+      # Optional: ntfy push notifications (works when Telegram is blocked)
+      - key: NTFY_TOPIC
+        sync: false
+      - key: NTFY_COMMAND_TOPIC
+        sync: false
+      - key: NTFY_SERVER
+        value: https://ntfy.sh
