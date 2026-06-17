@@ -122,12 +122,12 @@
       [
         "period",
         "Number of candles used to calculate the ATR. Shorter = more reactive",
-        7
+        10
       ],
       [
         "multiplier",
         "ATR multiplier. Higher = wider bands / less sensitive",
-        3
+        2
       ]
     ],
     "output": [
