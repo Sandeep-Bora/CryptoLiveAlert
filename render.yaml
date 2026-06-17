@@ -24,5 +24,7 @@ services:
         sync: false
       - key: NTFY_COMMAND_TOPIC
         sync: false
+      - key: NTFY_TOKEN
+        sync: false
       - key: NTFY_SERVER
         value: https://ntfy.sh

@@ -13,8 +13,8 @@ from .user_configuration import LocalUserConfiguration, MongoDBUserConfiguration
 
 BaseConfig = LocalUserConfiguration if not USE_MONGO_DB else MongoDBUserConfiguration
 
-# Titles/tags on outbound alert pushes — ignore these on the command topic stream
-_ALERT_TITLE_MARKERS = ("CEX ALERT", "TECHNICAL ALERT", "Crypto Alert")
+# Ignore our own outbound pushes when reading the command topic stream
+_ALERT_TITLE_MARKERS = ("CEX ALERT", "TECHNICAL ALERT", "Crypto Alert", "Bot Reply")
 _COMMAND_PREFIXES = (
     "new_alert",
     "/new_alert",
@@ -37,10 +37,12 @@ def get_ntfy_command_topic() -> str | None:
     return None
 
 
-def _is_outbound_alert_echo(title: str, message: str) -> bool:
+def _is_outbound_echo(title: str, message: str, tags: list | None = None) -> bool:
     if title and any(marker in title for marker in _ALERT_TITLE_MARKERS):
         return True
     if message.startswith("🔔") or message.startswith("Bot Reply:"):
+        return True
+    if tags and "robot" in tags:
         return True
     return False
 
@@ -48,6 +50,15 @@ def _is_outbound_alert_echo(title: str, message: str) -> bool:
 def _looks_like_command(message: str) -> bool:
     lower = message.strip().lower()
     return any(lower.startswith(p) for p in _COMMAND_PREFIXES)
+
+
+def _retry_after_seconds(response: requests.Response | None, default: int) -> int:
+    if response is None:
+        return default
+    raw = response.headers.get("Retry-After")
+    if raw and raw.isdigit():
+        return max(int(raw), default)
+    return default
 
 
 class NtfyCommandListener:
@@ -59,8 +70,8 @@ class NtfyCommandListener:
         self.server = (getenv("NTFY_SERVER") or "https://ntfy.sh").rstrip("/")
         self.command_topic = get_ntfy_command_topic()
         self.user_id = getenv("NTFY_COMMAND_USER_ID") or getenv("TELEGRAM_USER_ID")
-        self.auth_token = getenv("NTFY_COMMAND_TOKEN")
-        self._since = "all"
+        self.auth_token = getenv("NTFY_COMMAND_TOKEN") or getenv("NTFY_TOKEN")
+        self._since = "30m"
         self._seen_ids: set[str] = set()
         self._lock = threading.Lock()
 
@@ -70,10 +81,16 @@ class NtfyCommandListener:
         return {}
 
     def _reply(self, text: str) -> None:
+        """Send command response to the command topic (where the user is) and alert topic(s)."""
+        topics: list[str] = []
+        if self.command_topic:
+            topics.append(self.command_topic)
         configuration = BaseConfig(str(self.user_id))
-        topics = configuration.get_ntfy_topics()
+        for topic in configuration.get_ntfy_topics():
+            if topic and topic not in topics:
+                topics.append(topic)
         if not topics:
-            logger.warning("ntfy command reply skipped — no ntfy topics configured")
+            logger.warning("ntfy command reply skipped — no topics configured")
             return
         for topic in topics:
             send_ntfy(
@@ -102,8 +119,9 @@ class NtfyCommandListener:
 
         message = (payload.get("message") or "").strip()
         title = (payload.get("title") or "").strip()
+        tags = payload.get("tags") or []
 
-        if not message or _is_outbound_alert_echo(title, message):
+        if not message or _is_outbound_echo(title, message, tags):
             return
         if not _looks_like_command(message):
             return
@@ -117,6 +135,31 @@ class NtfyCommandListener:
 
         self._reply(response)
 
+    def _listen_once(self) -> None:
+        """Open one long-lived JSON stream (no poll=1 loop — avoids ntfy 429 rate limits)."""
+        url = f"{self.server}/{self.command_topic}/json"
+        params = {"since": self._since}
+        with requests.get(
+            url,
+            params=params,
+            headers=self._headers(),
+            stream=True,
+            timeout=(15, 360),
+        ) as response:
+            if response.status_code == 429:
+                wait = _retry_after_seconds(response, 60)
+                raise requests.HTTPError(
+                    f"429 Too Many Requests — retry after {wait}s", response=response
+                )
+            response.raise_for_status()
+            for raw_line in response.iter_lines(decode_unicode=True):
+                if not raw_line:
+                    continue
+                payload = json.loads(raw_line)
+                if payload.get("id"):
+                    self._since = payload["id"]
+                self._handle_message(payload)
+
     def run(self) -> None:
         if not self.command_topic:
             logger.info("NTFY_COMMAND_TOPIC not set — ntfy command listener disabled")
@@ -127,33 +170,45 @@ class NtfyCommandListener:
 
         logger.info(
             f"ntfy command listener started on topic '{self.command_topic}' "
-            f"(publish commands here; replies go to your alert topic)"
+            f"(publish commands here; replies appear on this topic + NTFY_TOPIC)"
         )
+        if not self.auth_token:
+            logger.info(
+                "Tip: set NTFY_TOKEN (ntfy.sh access token) for higher rate limits on Render"
+            )
 
+        backoff = 15
         while True:
             try:
-                url = f"{self.server}/{self.command_topic}/json"
-                params = {"poll": 1, "since": self._since}
-                with requests.get(
-                    url,
-                    params=params,
-                    headers=self._headers(),
-                    stream=True,
-                    timeout=130,
-                ) as response:
-                    response.raise_for_status()
-                    for raw_line in response.iter_lines(decode_unicode=True):
-                        if not raw_line:
-                            continue
-                        payload = json.loads(raw_line)
-                        if payload.get("id"):
-                            self._since = payload["id"]
-                        self._handle_message(payload)
+                self._listen_once()
+                backoff = 15
             except KeyboardInterrupt:
                 return
+            except requests.HTTPError as exc:
+                if exc.response is not None and exc.response.status_code == 429:
+                    wait = _retry_after_seconds(exc.response, backoff)
+                    logger.warning(
+                        f"ntfy rate limit (429) — backing off {wait}s. "
+                        f"Set NTFY_TOKEN on Render for higher limits, or wait before retrying."
+                    )
+                    sleep(wait)
+                    backoff = min(backoff * 2, 300)
+                else:
+                    logger.warning(f"ntfy command listener HTTP error — retry in {backoff}s: {exc}")
+                    sleep(backoff)
+                    backoff = min(backoff * 2, 120)
+            except (
+                requests.exceptions.ConnectionError,
+                requests.exceptions.ChunkedEncodingError,
+                requests.exceptions.ReadTimeout,
+            ) as exc:
+                logger.info(f"ntfy stream ended ({exc}) — reconnecting in {backoff}s")
+                sleep(backoff)
+                backoff = min(backoff * 2, 120)
             except Exception as exc:
-                logger.warning(f"ntfy command listener error — retrying in 10s: {exc}")
-                sleep(10)
+                logger.warning(f"ntfy command listener error — retry in {backoff}s: {exc}")
+                sleep(backoff)
+                backoff = min(backoff * 2, 120)
 
 
 def start_ntfy_command_listener(telegram_bot) -> None:
