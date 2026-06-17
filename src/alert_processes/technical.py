@@ -46,23 +46,55 @@ class TechnicalAlertProcess(BaseAlertProcess):
             remove_queue = []
             for alert in alerts_database[pair]:
                 if alert["type"] == "t":
-                    condition, value, post_string = self.get_technical_indicator(
+                    condition, value, post_string, matched = self.get_technical_indicator(
                         pair, alert
                     )
+
+                    # EQUALS on string outputs (e.g. SuperTrend long/short): alert on flip only
+                    if alert.get("comparison") == "EQUALS" and value not in (None, "", 0):
+                        flip, previous = self._process_equals_flip(alert, value)
+                        do_update = True
+                        if flip:
+                            condition = True
+                            current = str(value).strip().lower()
+                            if (
+                                alert.get("indicator", "").upper() == "SUPERTREND"
+                                and alert.get("output_value") == "valueAdvice"
+                                and matched
+                            ):
+                                post_string = self._format_supertrend_flip(
+                                    pair, alert, current, previous, matched
+                                )
+                            elif previous and post_string:
+                                post_string = (
+                                    post_string.rstrip()
+                                    + f"\nTREND FLIP: {previous} → {current}\n"
+                                )
+                        else:
+                            condition = False
 
                     if condition:  # If there is a technical alert condition satisfied
                         cooldown = alert.get("trigger", {}).get("cooldown_seconds")
                         last_trigger = alert.get("trigger", {}).get("last_triggered", 0)
-                        if int(time.time()) > last_trigger + (cooldown or 0):
+                        # Flip alerts (EQUALS) fire once per change; cooldown optional debounce only
+                        cooldown_ok = (
+                            alert.get("comparison") == "EQUALS"
+                            or int(time.time()) > last_trigger + (cooldown or 0)
+                        )
+                        if cooldown_ok:
                             post_queue.append((post_string, pair))
-                            alert["trigger"] = {
-                                "cooldown_seconds": cooldown,
-                                "last_triggered": int(time.time()),
-                            }
+                            if cooldown:
+                                alert["trigger"] = {
+                                    "cooldown_seconds": cooldown,
+                                    "last_triggered": int(time.time()),
+                                }
                             do_update = True
 
-                        if not alert.get("trigger", {}).get("cooldown_seconds"):
-                            # If the alert has no cooldown setting, remove after one trigger
+                        if (
+                            not alert.get("trigger", {}).get("cooldown_seconds")
+                            and alert.get("comparison") != "EQUALS"
+                        ):
+                            # One-time numeric alerts only; EQUALS flip alerts stay active
                             remove_queue.append(alert)
                             do_update = True
 
@@ -102,9 +134,71 @@ class TechnicalAlertProcess(BaseAlertProcess):
         for user in get_whitelist():
             self.poll_user_alerts(tg_user_id=user)
 
+    def _process_equals_flip(self, alert: dict, value) -> tuple[bool, str | None]:
+        """
+        Edge-trigger for EQUALS alerts (e.g. SuperTrend valueAdvice).
+        Fires only when the value changes TO the alert target (not every poll while unchanged).
+        """
+        current = str(value).strip().lower()
+        target = str(alert["target"]).strip().lower()
+        last_seen = alert.get("last_seen_value")
+
+        if last_seen is None:
+            alert["last_seen_value"] = current
+            return False, None
+
+        if last_seen == current:
+            return False, None
+
+        previous = last_seen
+        alert["last_seen_value"] = current
+        if current != target:
+            return False, None
+
+        return True, previous
+
+    def _format_price(self, price: float) -> str:
+        rounded = round(price, OUTPUT_VALUE_PRECISION)
+        if rounded == int(rounded):
+            return str(int(rounded))
+        return f"{rounded:.{OUTPUT_VALUE_PRECISION}f}"
+
+    def _format_supertrend_flip(
+        self,
+        pair: str,
+        alert: dict,
+        trend: str,
+        previous: str | None,
+        matched_indicator: dict,
+    ) -> str:
+        """Build flip alert with spot entry price and SuperTrend line as hold/stop level."""
+        st_line = matched_indicator.get("values", {}).get("value")
+        try:
+            spot = self.telegram_bot.get_latest_binance_price(pair)
+        except Exception as exc:
+            logger.warning(f"Could not fetch spot price for {pair}: {exc}")
+            spot = None
+
+        flip_line = (
+            f"TREND FLIP: {previous} → {trend}" if previous else f"TREND: {trend.upper()}"
+        )
+        lines = [
+            f"{pair} SuperTrend ({alert['interval']}) — {flip_line}",
+        ]
+        if spot is not None and st_line is not None:
+            lines.append(
+                f"{trend} from {self._format_price(spot)} and hold till {self._format_price(st_line)}"
+            )
+        elif spot is not None:
+            lines.append(f"{trend} from {self._format_price(spot)}")
+        elif st_line is not None:
+            lines.append(f"{trend} — hold till {self._format_price(st_line)}")
+
+        return "\n".join(lines) + "\n"
+
     def get_technical_indicator(
         self, pair: str, alert: dict
-    ) -> tuple[bool, float, str]:
+    ) -> tuple[bool, float | str, str, dict | None]:
         """
         Accounts for all of the implemented taapi.io indicators.
         Get the available indicators using the telegram command.
@@ -118,7 +212,7 @@ class TechnicalAlertProcess(BaseAlertProcess):
                   (Float) The current value of the indicator
                   (String) The formatted string to send with alerts
         """
-        null_output = False, 0, ""
+        null_output = False, 0, "", None
 
         aggregate = self.ta_agg_cli.load_agg()
         if not aggregate:
@@ -191,8 +285,10 @@ class TechnicalAlertProcess(BaseAlertProcess):
                 f"{pair} {indicator_str} {alert['interval']} {params_str} {alert['comparison']} {alert['target']}"
                 f" AT {value_display}\n"
             )
-            return True, value, post_str
+            return True, value, post_str, matched_indicator
         else:
+            if alert["comparison"] == "EQUALS":
+                return False, value, "", matched_indicator
             return null_output
 
     def tg_alert(

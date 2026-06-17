@@ -9,7 +9,7 @@
       "output_value": "valueAdvice",
       "target": "long",
       "trigger": {
-        "cooldown_seconds": 30,
+        "cooldown_seconds": null,
         "last_triggered": 0
       }
     },
@@ -22,7 +22,7 @@
       "output_value": "valueAdvice",
       "target": "short",
       "trigger": {
-        "cooldown_seconds": 30,
+        "cooldown_seconds": null,
         "last_triggered": 0
       }
     }
