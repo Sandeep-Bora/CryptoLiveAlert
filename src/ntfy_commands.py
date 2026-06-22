@@ -9,7 +9,11 @@ from .config import USE_MONGO_DB
 from .alert_commands import AlertCommandHandler
 from .logger import logger
 from .notifications import send_ntfy
-from .user_configuration import LocalUserConfiguration, MongoDBUserConfiguration
+from .user_configuration import (
+    LocalUserConfiguration,
+    MongoDBUserConfiguration,
+    get_whitelist,
+)
 
 BaseConfig = LocalUserConfiguration if not USE_MONGO_DB else MongoDBUserConfiguration
 
@@ -25,6 +29,9 @@ _COMMAND_PREFIXES = (
     "view_alerts",
     "/view_alerts",
 )
+
+# Set when the background listener thread starts (used by /health)
+_listener_status: dict = {"running": False, "topic": None, "error": None}
 
 
 def get_ntfy_command_topic() -> str | None:
@@ -83,23 +90,31 @@ class NtfyCommandListener:
         return {}
 
     def _reply(self, text: str) -> None:
-        """Send command response to the command topic the user published to."""
-        if not self.command_topic:
-            logger.warning("ntfy command reply skipped — no command topic configured")
+        """Send command response to command topic and alert topic(s)."""
+        topics: list[str] = []
+        if self.command_topic:
+            topics.append(self.command_topic)
+        configuration = BaseConfig(str(self.user_id))
+        for topic in configuration.get_ntfy_topics():
+            if topic and topic not in topics:
+                topics.append(topic)
+        if not topics:
+            logger.warning("ntfy command reply skipped — no topics configured")
             return
-        ok = send_ntfy(
-            message=text,
-            topic=self.command_topic,
-            title="Bot Reply",
-            server=self.server,
-            priority="default",
-            tags="robot",
-            auth_token=self.auth_token,
-        )
-        if ok:
-            logger.info(f"ntfy command reply sent to '{self.command_topic}'")
-        else:
-            logger.warning(f"ntfy command reply failed for topic '{self.command_topic}'")
+        for topic in topics:
+            ok = send_ntfy(
+                message=text,
+                topic=topic,
+                title="Bot Reply",
+                server=self.server,
+                priority="default",
+                tags="robot",
+                auth_token=self.auth_token,
+            )
+            if ok:
+                logger.info(f"ntfy command reply sent to '{topic}'")
+            else:
+                logger.warning(f"ntfy command reply failed for topic '{topic}'")
 
     def _handle_message(self, payload: dict) -> None:
         if payload.get("event") != "message":
@@ -169,15 +184,28 @@ class NtfyCommandListener:
 
     def run(self) -> None:
         if not self.command_topic:
+            _listener_status.update(
+                running=False, topic=None, error="NTFY_COMMAND_TOPIC not set"
+            )
             logger.info("NTFY_COMMAND_TOPIC not set — ntfy command listener disabled")
             return
         if not self.user_id:
+            _listener_status.update(
+                running=False, topic=self.command_topic, error="TELEGRAM_USER_ID not set"
+            )
             logger.warning("TELEGRAM_USER_ID required for ntfy commands — listener disabled")
             return
 
+        # Render uses ephemeral disk — re-whitelist on each deploy/restart
+        uid = str(self.user_id)
+        if uid not in get_whitelist():
+            logger.info(f"Auto-whitelisting Telegram user {uid} for ntfy commands")
+            BaseConfig(uid).whitelist_user(is_admin=True)
+
+        _listener_status.update(running=True, topic=self.command_topic, error=None)
         logger.info(
             f"ntfy command listener started on topic '{self.command_topic}' "
-            f"(publish commands here; replies appear on this topic)"
+            f"(publish commands here; replies appear on this topic + NTFY_TOPIC)"
         )
         if not self.auth_token:
             logger.info(
@@ -216,6 +244,10 @@ class NtfyCommandListener:
                 logger.warning(f"ntfy command listener error — retry in {backoff}s: {exc}")
                 sleep(backoff)
                 backoff = min(backoff * 2, 120)
+
+
+def get_ntfy_listener_status() -> dict:
+    return dict(_listener_status)
 
 
 def start_ntfy_command_listener(telegram_bot) -> None:

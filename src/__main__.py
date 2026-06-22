@@ -1,3 +1,4 @@
+import json
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from os import getenv
@@ -10,13 +11,27 @@ from .utils import handle_env
 from .indicators import TaapiioProcess
 from .logger import logger
 from .setup import do_setup
-from .ntfy_commands import start_ntfy_command_listener
+from .ntfy_commands import start_ntfy_command_listener, get_ntfy_listener_status
 
 
 class _HealthCheckHandler(BaseHTTPRequestHandler):
     """Minimal handler so platforms like Render detect an open port and uptime pingers keep the service awake."""
 
     def do_GET(self):
+        if self.path.rstrip("/") == "/health":
+            status = get_ntfy_listener_status()
+            body = json.dumps(
+                {
+                    "status": "ok",
+                    "ntfy_listener": status,
+                    "whitelisted_users": len(get_whitelist()),
+                }
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(body)
+            return
         self.send_response(200)
         self.send_header("Content-Type", "text/plain")
         self.end_headers()
