@@ -37,13 +37,15 @@ def get_ntfy_command_topic() -> str | None:
     return None
 
 
-def _is_outbound_echo(title: str, message: str, tags: list | None = None) -> bool:
+def _is_outbound_echo(title: str, message: str, tags=None) -> bool:
     if title and any(marker in title for marker in _ALERT_TITLE_MARKERS):
         return True
     if message.startswith("🔔") or message.startswith("Bot Reply:"):
         return True
-    if tags and "robot" in tags:
-        return True
+    if tags:
+        tag_list = tags if isinstance(tags, list) else str(tags).split(",")
+        if "robot" in tag_list:
+            return True
     return False
 
 
@@ -81,26 +83,23 @@ class NtfyCommandListener:
         return {}
 
     def _reply(self, text: str) -> None:
-        """Send command response to the command topic (where the user is) and alert topic(s)."""
-        topics: list[str] = []
-        if self.command_topic:
-            topics.append(self.command_topic)
-        configuration = BaseConfig(str(self.user_id))
-        for topic in configuration.get_ntfy_topics():
-            if topic and topic not in topics:
-                topics.append(topic)
-        if not topics:
-            logger.warning("ntfy command reply skipped — no topics configured")
+        """Send command response to the command topic the user published to."""
+        if not self.command_topic:
+            logger.warning("ntfy command reply skipped — no command topic configured")
             return
-        for topic in topics:
-            send_ntfy(
-                message=text,
-                topic=topic,
-                title="Bot Reply",
-                server=self.server,
-                priority="default",
-                tags="robot",
-            )
+        ok = send_ntfy(
+            message=text,
+            topic=self.command_topic,
+            title="Bot Reply",
+            server=self.server,
+            priority="default",
+            tags="robot",
+            auth_token=self.auth_token,
+        )
+        if ok:
+            logger.info(f"ntfy command reply sent to '{self.command_topic}'")
+        else:
+            logger.warning(f"ntfy command reply failed for topic '{self.command_topic}'")
 
     def _handle_message(self, payload: dict) -> None:
         if payload.get("event") != "message":
@@ -121,9 +120,17 @@ class NtfyCommandListener:
         title = (payload.get("title") or "").strip()
         tags = payload.get("tags") or []
 
+        # ntfy app sometimes puts text in Title and leaves Message empty
+        if not message and title and _looks_like_command(title):
+            message = title
+            title = ""
+
         if not message or _is_outbound_echo(title, message, tags):
             return
         if not _looks_like_command(message):
+            logger.debug(
+                f"ntfy message ignored (not a command): title={title!r} message={message!r}"
+            )
             return
 
         logger.info(f"ntfy command received: {message[:120]}")
@@ -170,7 +177,7 @@ class NtfyCommandListener:
 
         logger.info(
             f"ntfy command listener started on topic '{self.command_topic}' "
-            f"(publish commands here; replies appear on this topic + NTFY_TOPIC)"
+            f"(publish commands here; replies appear on this topic)"
         )
         if not self.auth_token:
             logger.info(

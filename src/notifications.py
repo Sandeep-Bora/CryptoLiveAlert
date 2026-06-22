@@ -13,6 +13,7 @@ def send_ntfy(
     server: str = None,
     priority: str = "high",
     tags: str = "chart,moneybag",
+    auth_token: str = None,
 ) -> bool:
     """Publish a push notification to an ntfy topic."""
     server = (server or getenv("NTFY_SERVER") or "https://ntfy.sh").rstrip("/")
@@ -20,15 +21,20 @@ def send_ntfy(
     if not topic:
         return False
 
+    token = auth_token or getenv("NTFY_TOKEN") or getenv("NTFY_COMMAND_TOKEN")
+    headers = {
+        "Title": title[:250],
+        "Priority": priority,
+        "Tags": tags,
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
     try:
         response = requests.post(
             f"{server}/{topic}",
             data=strip_html(message).encode("utf-8"),
-            headers={
-                "Title": title[:250],
-                "Priority": priority,
-                "Tags": tags,
-            },
+            headers=headers,
             timeout=15,
         )
         if not response.ok:
