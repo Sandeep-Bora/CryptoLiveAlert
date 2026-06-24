@@ -2,8 +2,22 @@ from os import getenv
 
 import requests
 
+from .config import *
 from .logger import logger
 from .utils import strip_html
+
+
+def resolve_ntfy_topics(configured: list[str] | None = None) -> list[str]:
+    """Merge user-configured topics with NTFY_TOPIC from the environment."""
+    topics: list[str] = []
+    for topic in configured or []:
+        topic = (topic or "").strip()
+        if topic and topic not in topics:
+            topics.append(topic)
+    env_topic = (getenv("NTFY_TOPIC") or "").strip()
+    if env_topic and env_topic not in topics:
+        topics.append(env_topic)
+    return topics
 
 
 def send_ntfy(
@@ -70,6 +84,8 @@ def dispatch_alerts(
         )
 
     tg_ok, tg_fail = [], []
+    ntfy_topics = resolve_ntfy_topics(ntfy_topics)
+
     for chat_id in channel_ids:
         try:
             telegram_bot.send_message(
@@ -90,6 +106,15 @@ def dispatch_alerts(
             ntfy_ok.append(topic)
         else:
             ntfy_fail.append(topic)
+
+    if channel_ids:
+        logger.info(f"Telegram alert → {len(channel_ids)} channel(s)")
+    if ntfy_topics:
+        logger.info(f"ntfy alert → {len(ntfy_topics)} topic(s): {', '.join(ntfy_topics)}")
+    elif getenv("NTFY_TOPIC"):
+        logger.warning("NTFY_TOPIC is set but no ntfy topics resolved for dispatch")
+    else:
+        logger.debug("No ntfy topics configured (set NTFY_TOPIC env or /ntfy ADD)")
 
     if ntfy_ok:
         logger.info(f"ntfy alert sent to: {', '.join(ntfy_ok)}")

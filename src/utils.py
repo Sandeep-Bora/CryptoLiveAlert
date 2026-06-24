@@ -5,7 +5,7 @@ from functools import wraps
 from ratelimit import limits, sleep_and_retry
 import re
 
-from .config import *
+from .config import get_taapi_intervals, interval_tier_hint
 
 """ -------------- UTILITIES -------------- """
 
@@ -143,15 +143,23 @@ def build_new_alert_guide(indicators_db: dict, example_interval: str = "1h") -> 
     Build HTML messages listing supported timeframes and exact /new_alert examples
     for every bundled indicator. Splits into multiple messages if over Telegram's limit.
     """
-    if example_interval not in INTERVALS:
+    if example_interval not in get_taapi_intervals():
         example_interval = "1h"
 
-    intervals_line = ", ".join(f"<code>{i}</code>" for i in INTERVALS)
+    intervals_line = ", ".join(f"<code>{i}</code>" for i in get_taapi_intervals())
+    tier = (getenv("TAAPIIO_TIER") or "free").lower()
+    tier_note = ""
+    if tier == "free":
+        tier_note = (
+            "\n<i>Free taapi.io plan: 30m, 2h, 6h, 12h are unavailable — "
+            "use 15m or 1h instead of 30m.</i>"
+        )
     header = (
         "<b>/new_alert — command guide</b>\n\n"
         "<b>Supported timeframes:</b>\n"
         f"{intervals_line}\n"
-        "<i>Shortest: 1m · Longest: 1w (taapi.io has no 1-month candle — use 1w)</i>\n\n"
+        "<i>Shortest: 1m · Longest: 1w (taapi.io has no 1-month candle — use 1w)</i>"
+        f"{tier_note}\n\n"
         "<b>Simple (price) format:</b>\n"
         "<code>/new_alert PAIR/PAIR INDICATOR COMPARISON TARGET [COOLDOWN]</code>\n"
         f"Comparisons: {', '.join(SIMPLE_INDICATOR_COMPARISONS)}\n\n"

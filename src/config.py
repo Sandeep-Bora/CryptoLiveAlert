@@ -40,8 +40,37 @@ AGG_DATA_LOCATION = join(dirname(abspath(__file__)), "temp/ta_aggregate.json")
 NTFY_DEFAULT_SERVER = "https://ntfy.sh"
 
 """TAAPI.IO"""
-# taapi.io supported intervals (1m = shortest, 1w = longest; no 1-month candle on the API)
-INTERVALS = ["1m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "1w"]
+# Full interval list (paid plans / taapi.io docs)
+TAAPI_INTERVALS_ALL = [
+    "1m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "1w",
+]
+# Free tier ("Limited Binance data") — verified against taapi.io free API keys
+TAAPI_INTERVALS_FREE = ["1m", "5m", "15m", "1h", "4h", "1d", "1w"]
+INTERVALS = TAAPI_INTERVALS_ALL  # backward compatibility
+
+
+def get_taapi_intervals() -> list[str]:
+    """Return timeframes allowed for the configured TAAPIIO_TIER."""
+    tier = (getenv("TAAPIIO_TIER") or "free").lower()
+    if tier == "free":
+        return list(TAAPI_INTERVALS_FREE)
+    return list(TAAPI_INTERVALS_ALL)
+
+
+def interval_tier_hint(interval: str) -> str:
+    """Explain why an interval may fail on the current taapi.io plan."""
+    if interval in TAAPI_INTERVALS_FREE:
+        return ""
+    if interval in TAAPI_INTERVALS_ALL:
+        tier = (getenv("TAAPIIO_TIER") or "free").lower()
+        if tier == "free":
+            return (
+                f"\n\n'{interval}' is not available on the taapi.io **free** plan "
+                f"(limited Binance intervals).\n"
+                f"Free plan intervals: {', '.join(TAAPI_INTERVALS_FREE)}\n"
+                f"Use 15m or 1h instead of 30m, or upgrade at https://taapi.io/#pricing"
+            )
+    return ""
 DEFAULT_EXCHANGE = "binance"
 BULK_ENDPOINT = "https://api.taapi.io/bulk"
 SUBSCRIPTION_TIERS = {

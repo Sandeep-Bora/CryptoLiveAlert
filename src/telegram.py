@@ -185,7 +185,7 @@ class TelegramBot(TeleBot):
             output += "\n<u><b>Technical Indicators:</b></u>\n"
             output += (
                 f"   • <u>Supported timeframes:</u> "
-                f"{', '.join(INTERVALS)} "
+                f"{', '.join(get_taapi_intervals())} "
                 f"(longest: 1w — no 1-month on taapi.io)\n"
                 f"   • Send <code>/new_alert help</code> for exact copy-paste examples\n\n"
             )
@@ -590,6 +590,7 @@ class TelegramBot(TeleBot):
                 err_msg += f" - {r['errors']}"
             if "error" in r.keys():
                 err_msg += f" - {r['error']}"
+            err_msg += interval_tier_hint(indicator.interval)
             raise Exception(err_msg)
 
     def parse_technical_indicator_message(
@@ -614,9 +615,11 @@ class TelegramBot(TeleBot):
         pair = splt_msg[0]
         indicator_id = splt_msg[1].upper()
         interval = splt_msg[2].lower()
-        assert interval in INTERVALS, (
-            f"'{interval}' is not a supported timeframe.\n"
-            f"Options: {', '.join(INTERVALS)}\n"
+        allowed = get_taapi_intervals()
+        assert interval in allowed, (
+            f"'{interval}' is not a supported timeframe for your taapi.io plan.\n"
+            f"Options: {', '.join(allowed)}"
+            f"{interval_tier_hint(interval)}\n"
             f"Note: taapi.io max is 1w (no 1-month candle)."
         )
         try:

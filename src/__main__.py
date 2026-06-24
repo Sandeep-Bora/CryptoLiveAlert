@@ -6,7 +6,12 @@ from time import sleep
 
 from .alert_processes import CEXAlertProcess, TechnicalAlertProcess
 from .telegram import TelegramBot
-from .user_configuration import get_whitelist
+from .config import USE_MONGO_DB
+from .user_configuration import (
+    LocalUserConfiguration,
+    MongoDBUserConfiguration,
+    get_whitelist,
+)
 from .utils import handle_env
 from .indicators import TaapiioProcess
 from .logger import logger
@@ -64,6 +69,18 @@ if __name__ == "__main__":
         do_setup()
         logger.info("Waiting for initialization ...")
         sleep(5)
+
+    # Ensure NTFY_TOPIC from env is registered for every whitelisted user
+    ntfy_topic = getenv("NTFY_TOPIC")
+    if ntfy_topic:
+        BaseConfig = (
+            LocalUserConfiguration if not USE_MONGO_DB else MongoDBUserConfiguration
+        )
+        for uid in get_whitelist():
+            try:
+                BaseConfig(uid).add_ntfy_topics([ntfy_topic.strip()])
+            except Exception as exc:
+                logger.warning(f"Could not sync ntfy topic for user {uid}: {exc}")
 
     taapiio_process = None
     if getenv("TAAPIIO_APIKEY"):
