@@ -12,11 +12,15 @@ from .user_configuration import (
     MongoDBUserConfiguration,
     get_whitelist,
 )
-from .utils import handle_env
+from .utils import handle_env, is_telegram_polling_enabled
 from .indicators import TaapiioProcess
 from .logger import logger
 from .setup import do_setup
-from .ntfy_commands import start_ntfy_command_listener, get_ntfy_listener_status
+from .ntfy_commands import (
+    start_ntfy_command_listener,
+    get_ntfy_listener_status,
+    get_ntfy_command_topic,
+)
 
 
 class _HealthCheckHandler(BaseHTTPRequestHandler):
@@ -28,7 +32,9 @@ class _HealthCheckHandler(BaseHTTPRequestHandler):
             body = json.dumps(
                 {
                     "status": "ok",
+                    "telegram_polling": is_telegram_polling_enabled(),
                     "ntfy_listener": status,
+                    "ntfy_command_topic": get_ntfy_command_topic(),
                     "whitelisted_users": len(get_whitelist()),
                 }
             ).encode()
@@ -90,16 +96,30 @@ if __name__ == "__main__":
             telegram_bot_token=getenv("TELEGRAM_BOT_TOKEN"),
         )
 
-    # Create the Telegram bot to listen to commands and send messages
+    # Create the Telegram bot (used for sending alerts + shared command handler)
     telegram_bot = TelegramBot(
         bot_token=getenv("TELEGRAM_BOT_TOKEN"), taapiio_process=taapiio_process
     )
 
-    # Run the TG bot in a daemon thread
-    threading.Thread(target=telegram_bot.run, daemon=True).start()
+    ntfy_cmd_topic = get_ntfy_command_topic()
+    if getenv("NTFY_TOPIC"):
+        logger.info(
+            f"ntfy alerts topic: {getenv('NTFY_TOPIC')} | "
+            f"commands topic: {ntfy_cmd_topic or '(unset)'}"
+        )
+    else:
+        logger.warning(
+            "NTFY_TOPIC not set — ntfy alerts disabled; set it on Render to enable push notifications"
+        )
 
-    # Listen for alert commands published to ntfy (new_alert, cancel_alert, view_alerts)
+    # Start ntfy command listener FIRST (independent of Telegram polling / 409 conflicts)
     start_ntfy_command_listener(telegram_bot)
+
+    # Telegram polling for /commands — only one instance may poll (409 if duplicated)
+    if is_telegram_polling_enabled():
+        threading.Thread(target=telegram_bot.run, daemon=True).start()
+    else:
+        logger.info("Skipping Telegram polling thread (TELEGRAM_POLLING=false)")
 
     # Run the CEXAlertProcess in a daemon thread
     threading.Thread(

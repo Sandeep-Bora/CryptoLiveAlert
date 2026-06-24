@@ -15,6 +15,7 @@ from .utils import (
     get_commands,
     get_binance_price_url,
     build_new_alert_guide,
+    is_telegram_polling_enabled,
 )
 from .alert_commands import AlertCommandHandler
 from .ntfy_commands import get_ntfy_command_topic
@@ -25,6 +26,7 @@ from .models import TechnicalAlert, CEXAlert
 from telebot import TeleBot, types
 import requests
 from requests.exceptions import ReadTimeout
+from telebot.apihelper import ApiTelegramException
 
 BaseConfig = LocalUserConfiguration if not USE_MONGO_DB else MongoDBUserConfiguration
 
@@ -681,11 +683,52 @@ class TelegramBot(TeleBot):
 
     def run(self):
         logger.warn(f"{self.get_me().username} started at {datetime.utcnow()} UTC+0")
+
+        if not is_telegram_polling_enabled():
+            logger.info(
+                "Telegram polling disabled (TELEGRAM_POLLING=false). "
+                "Alerts still send via Telegram API; use ntfy for commands on this instance."
+            )
+            return
+
+        try:
+            self.delete_webhook(drop_pending_updates=True)
+            logger.info("Telegram webhook cleared — using long polling")
+        except Exception as exc:
+            logger.warning(f"Could not clear Telegram webhook: {exc}")
+
+        conflict_strikes = 0
         while True:
             try:
+                conflict_strikes = 0
                 self.polling(non_stop=True)
             except KeyboardInterrupt:
                 break
+            except ApiTelegramException as exc:
+                is_conflict = getattr(exc, "error_code", None) == 409 or (
+                    "409" in str(exc) and "conflict" in str(exc).lower()
+                )
+                if is_conflict:
+                    conflict_strikes += 1
+                    logger.error(
+                        "Telegram 409 Conflict: another bot instance is polling the same token. "
+                        "Stop the duplicate (e.g. run locally: pkill -f 'python -m src') "
+                        "or set TELEGRAM_POLLING=false on the extra instance. "
+                        "ntfy commands and outbound alerts keep working on this process."
+                    )
+                    if conflict_strikes >= 5:
+                        logger.error(
+                            "Giving up Telegram polling after repeated 409 errors. "
+                            "Set TELEGRAM_POLLING=false to silence this, or stop the other instance."
+                        )
+                        return
+                    time.sleep(30)
+                else:
+                    logger.critical(
+                        f"Telegram API error while polling — retrying in 30 seconds: {exc}",
+                        exc_info=exc,
+                    )
+                    time.sleep(30)
             except ReadTimeout:
                 logger.error(
                     "Bot has crashed due to read timeout - Restarting in 5 seconds..."

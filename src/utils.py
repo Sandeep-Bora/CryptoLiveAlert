@@ -15,6 +15,16 @@ def get_ratelimits() -> tuple:
     return SUBSCRIPTION_TIERS[getenv("TAAPIIO_TIER", "free").lower()]
 
 
+def is_telegram_polling_enabled() -> bool:
+    """Whether this instance should call getUpdates (Telegram command polling)."""
+    return (getenv("TELEGRAM_POLLING") or "true").strip().lower() not in (
+        "false",
+        "0",
+        "no",
+        "off",
+    )
+
+
 def get_logfile() -> str:
     """Get logfile path & create logs dir if it doesn't exist in the current working directory"""
     log_dir = join(getcwd(), "logs")

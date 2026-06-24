@@ -28,3 +28,6 @@ services:
         sync: false
       - key: NTFY_SERVER
         value: https://ntfy.sh
+      # Set false on a second instance (e.g. local dev) if Render already polls Telegram
+      - key: TELEGRAM_POLLING
+        value: "true"
