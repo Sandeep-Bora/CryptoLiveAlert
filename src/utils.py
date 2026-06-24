@@ -5,7 +5,7 @@ from functools import wraps
 from ratelimit import limits, sleep_and_retry
 import re
 
-from .config import get_taapi_intervals, interval_tier_hint
+from .config import *
 
 """ -------------- UTILITIES -------------- """
 
