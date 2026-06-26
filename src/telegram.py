@@ -183,6 +183,17 @@ class TelegramBot(TeleBot):
             for comparison in SIMPLE_INDICATOR_COMPARISONS:
                 output += f"      - <b><i>{comparison}</i></b>\n"
 
+            output += "\n<u><b>ORB — Opening Range Breakout (LuxAlgo-style):</b></u>\n"
+            output += (
+                "<a href='https://www.luxalgo.com/library/indicator/opening-range-with-breakouts-targets/'"
+                "><b>ORB</b></a> (Binance klines — not taapi.io):\n"
+                "   • Alerts when price <b>crosses</b> OR High or OR Low after the opening window\n"
+                "   • Default: 5m range, UTC-4, session 09:30\n"
+                "   • <code>/new_alert BTC/USDT ORB default BOTH</code>\n"
+                "   • Custom: <code>/new_alert BTC/USDT ORB range=15,timezone=-4,session=09:30 ABOVE</code>\n"
+                "   • Directions: <b>ABOVE</b> | <b>BELOW</b> | <b>BOTH</b>\n\n"
+            )
+
             # Build technical indicators reference:
             output += "\n<u><b>Technical Indicators:</b></u>\n"
             output += (

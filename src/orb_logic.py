@@ -179,6 +179,14 @@ def compute_opening_range(
     )
 
 
+def _price_position(price: float, orb: ORBRange) -> str:
+    if price > orb.or_high:
+        return "above"
+    if price < orb.or_low:
+        return "below"
+    return "inside"
+
+
 def check_orb_breakout(
     price: float,
     direction: str,
@@ -187,7 +195,7 @@ def check_orb_breakout(
     params: ORBParams,
 ) -> tuple[bool, str, dict]:
     """
-    Check if price broke the opening range. Fires once per direction per session.
+    Edge-trigger: alert only when price *crosses* OR high/low (not if already outside).
 
     direction: ABOVE | BELOW | BOTH
     Returns (triggered, message, updated_state)
@@ -195,44 +203,60 @@ def check_orb_breakout(
     direction = direction.upper()
     state = dict(state or {})
     session_key = orb.session_key
+    position = _price_position(price, orb)
 
     if state.get("session_key") != session_key:
+        # New session — record where price is; never alert on first poll
         state = {
             "session_key": session_key,
             "breakout_above_fired": False,
             "breakout_below_fired": False,
+            "last_position": position,
         }
+        return False, "", state
 
+    last_position = state.get("last_position", "inside")
     messages = []
     triggered = False
     pct = int(params.target_pct)
 
-    if direction in ("ABOVE", "BOTH") and price > orb.or_high and not state.get(
-        "breakout_above_fired"
+    # Crossed above OR high (was not above, now above)
+    if (
+        direction in ("ABOVE", "BOTH")
+        and position == "above"
+        and last_position != "above"
+        and not state.get("breakout_above_fired")
     ):
         state["breakout_above_fired"] = True
         triggered = True
         messages.append(
-            f"BREAKOUT ABOVE opening range\n"
-            f"OR High: {_format_price(orb.or_high)} | OR Low: {_format_price(orb.or_low)} | "
-            f"Mid: {_format_price(orb.or_mid)}\n"
-            f"Breakout @ {_format_price(price)} → Target 1 ({pct}% range): "
+            f"BREAKOUT ABOVE — price crossed OR High {_format_price(orb.or_high)}\n"
+            f"Opening range: High {_format_price(orb.or_high)} | "
+            f"Low {_format_price(orb.or_low)} | Mid {_format_price(orb.or_mid)} "
+            f"(width {_format_price(orb.range_width)})\n"
+            f"Now @ {_format_price(price)} → Target 1 ({pct}% of range): "
             f"{_format_price(orb.target_above)}"
         )
 
-    if direction in ("BELOW", "BOTH") and price < orb.or_low and not state.get(
-        "breakout_below_fired"
+    # Crossed below OR low (was not below, now below)
+    if (
+        direction in ("BELOW", "BOTH")
+        and position == "below"
+        and last_position != "below"
+        and not state.get("breakout_below_fired")
     ):
         state["breakout_below_fired"] = True
         triggered = True
         messages.append(
-            f"BREAKOUT BELOW opening range\n"
-            f"OR High: {_format_price(orb.or_high)} | OR Low: {_format_price(orb.or_low)} | "
-            f"Mid: {_format_price(orb.or_mid)}\n"
-            f"Breakout @ {_format_price(price)} → Target 1 ({pct}% range): "
+            f"BREAKOUT BELOW — price crossed OR Low {_format_price(orb.or_low)}\n"
+            f"Opening range: High {_format_price(orb.or_high)} | "
+            f"Low {_format_price(orb.or_low)} | Mid {_format_price(orb.or_mid)} "
+            f"(width {_format_price(orb.range_width)})\n"
+            f"Now @ {_format_price(price)} → Target 1 ({pct}% of range): "
             f"{_format_price(orb.target_below)}"
         )
 
+    state["last_position"] = position
     post = "\n\n".join(messages)
     return triggered, post, state
 
