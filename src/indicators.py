@@ -173,7 +173,7 @@ class TAAggregateClient:
                 if symbol not in agg.keys():
                     agg[symbol] = {}
                 for alert in alerts:
-                    if alert["type"] == "s":
+                    if alert.get("type") != "t":
                         continue
                     if alert["interval"] not in agg[symbol].keys():
                         agg[symbol][alert["interval"]] = []
