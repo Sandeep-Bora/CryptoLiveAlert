@@ -4,7 +4,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from os import getenv
 from time import sleep
 
-from .alert_processes import CEXAlertProcess, TechnicalAlertProcess
+from .alert_processes import CEXAlertProcess, TechnicalAlertProcess, ORBAlertProcess
 from .telegram import TelegramBot
 from .config import USE_MONGO_DB
 from .user_configuration import (
@@ -124,6 +124,11 @@ if __name__ == "__main__":
     # Run the CEXAlertProcess in a daemon thread
     threading.Thread(
         target=CEXAlertProcess(telegram_bot=telegram_bot).run, daemon=True
+    ).start()
+
+    # Run the ORB alert process (LuxAlgo opening range — Binance klines, no taapi.io)
+    threading.Thread(
+        target=ORBAlertProcess(telegram_bot=telegram_bot).run, daemon=True
     ).start()
 
     if taapiio_process:

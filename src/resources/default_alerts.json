@@ -1,6 +1,23 @@
 {
   "BTC/USDT": [
     {
+      "type": "o",
+      "indicator": "ORB",
+      "comparison": "BOTH",
+      "params": {
+        "range_minutes": 5,
+        "timezone_offset": -4,
+        "session_start": "09:30",
+        "target_pct": 100,
+        "kline_interval": "1m"
+      },
+      "state": {},
+      "trigger": {
+        "cooldown_seconds": null,
+        "last_triggered": 0
+      }
+    },
+    {
       "type": "t",
       "indicator": "SUPERTREND",
       "comparison": "EQUALS",

@@ -81,4 +81,14 @@ SUBSCRIPTION_TIERS = {
 }  # (requests, per period in seconds)
 REQUEST_BUFFER = 0.05  # buffer percentage for preventing rate limit errors (e.x. 0.05 = 5% of request period, so period * 1.05)
 
+"""OPENING RANGE BREAKOUT (LuxAlgo ORB-style, Binance klines)"""
+ORB_POLLING_PERIOD = 30  # seconds between ORB checks
+ORB_RANGE_MINUTES_DEFAULT = 5
+ORB_TIMEZONE_OFFSET_DEFAULT = -4  # UTC-4 (matches TradingView session)
+ORB_SESSION_START_DEFAULT = "09:30"  # US cash open in UTC-4 (EDT)
+ORB_TARGET_PCT_DEFAULT = 100  # first target = 100% of range width beyond breakout
+ORB_DIRECTIONS = ["ABOVE", "BELOW", "BOTH"]  # ABOVE=break OR high, BELOW=break OR low
+BINANCE_KLINES_URL_GLOBAL = "https://api.binance.com/api/v3/klines"
+BINANCE_KLINES_URL_US = "https://api.binance.us/api/v3/klines"
+
 # TA_AGGREGATE_PPERIOD = 30  # TA Aggregate polling period, to poll technical indicators

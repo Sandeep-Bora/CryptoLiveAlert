@@ -1,7 +1,12 @@
 import re
 from os import getenv
 
-from .config import *
+from .config import (
+    MAX_ALERTS_PER_USER,
+    ORB_DIRECTIONS,
+    TECHNICAL_INDICATOR_COMPARISONS,
+    USE_MONGO_DB,
+)
 from .user_configuration import (
     LocalUserConfiguration,
     MongoDBUserConfiguration,
@@ -9,6 +14,7 @@ from .user_configuration import (
 )
 from .utils import parse_trigger_cooldown, build_new_alert_guide, strip_html_for_plain
 from .logger import logger
+from .orb_logic import parse_orb_param_string, ORBParams
 
 BaseConfig = LocalUserConfiguration if not USE_MONGO_DB else MongoDBUserConfiguration
 
@@ -50,7 +56,8 @@ class AlertCommandHandler:
             "Unknown command.\n\n"
             "Supported:\n"
             "  new_alert help\n"
-            "  new_alert BTC/USDT SUPERTREND 1h default valueAdvice EQUALS long 1h\n"
+            "  new_alert BTC/USDT ORB default BOTH\n"
+            "  new_alert BTC/USDT ORB range=15,timezone=-4,session=09:30 ABOVE\n"
             "  cancel_alert BTC/USDT 1\n"
             "  view_alerts\n"
             "  view_alerts BTC/USDT"
@@ -67,6 +74,8 @@ class AlertCommandHandler:
                 )
 
             indicator = msg[1].upper()
+            if indicator == "ORB":
+                return self.process_orb_new_alert(user_id, message_text, msg)
             if indicator in simple_indicators:
                 pair, indicator, comparison, target = msg[0], msg[1], msg[2], msg[3]
                 indicator_instance = self.bot.parse_simple_indicator_message(message_text)
@@ -101,7 +110,7 @@ class AlertCommandHandler:
                     )
             else:
                 return (
-                    f"Invalid indicator. Valid: {simple_indicators + technical_indicators}"
+                    f"Invalid indicator. Valid: {simple_indicators + ['ORB'] + technical_indicators}"
                 )
 
         except AssertionError as exc:
@@ -111,6 +120,9 @@ class AlertCommandHandler:
                 "Invalid message formatting.\n\n"
                 "Simple:\n"
                 "  new_alert PAIR/PAIR INDICATOR COMPARISON TARGET [COOLDOWN]\n\n"
+                "ORB (LuxAlgo Opening Range):\n"
+                "  new_alert PAIR ORB default BOTH\n"
+                "  new_alert PAIR ORB range=5,timezone=-4,session=09:30 ABOVE\n\n"
                 "Technical:\n"
                 "  new_alert PAIR INDICATOR TIMEFRAME PARAMS OUTPUT_VALUE COMPARISON TARGET [COOLDOWN]\n\n"
                 "Send: new_alert help"
@@ -180,6 +192,64 @@ class AlertCommandHandler:
         except Exception as exc:
             return f"An error occurred:\n{exc}"
 
+    def process_orb_new_alert(self, user_id: str, message_text: str, msg: list) -> str:
+        """Create LuxAlgo-style Opening Range Breakout alert."""
+        if len(msg) < 4:
+            return (
+                "ORB format:\n"
+                "  new_alert PAIR ORB PARAMS DIRECTION [COOLDOWN]\n\n"
+                "PARAMS: default (5m range, UTC-4, session 09:30)\n"
+                "  or range=5,timezone=-4,session=09:30,target_pct=100\n\n"
+                "DIRECTION: ABOVE | BELOW | BOTH\n\n"
+                "Examples:\n"
+                "  new_alert BTC/USDT ORB default BOTH\n"
+                "  new_alert BTC/USDT ORB range=15,timezone=-4,session=09:30 ABOVE"
+            )
+
+        pair = msg[0].upper()
+        params_str = msg[2]
+        direction = msg[3].upper()
+        if direction not in ORB_DIRECTIONS:
+            return f"Invalid direction '{direction}'. Options: {', '.join(ORB_DIRECTIONS)}"
+
+        try:
+            orb_params = parse_orb_param_string(params_str)
+            ORBParams.from_dict(orb_params)  # validate
+            trigger = parse_trigger_cooldown(msg[4] if len(msg) > 4 else None)
+
+            configuration = BaseConfig(user_id)
+            alerts_db = configuration.load_alerts()
+
+            if MAX_ALERTS_PER_USER is not None:
+                if sum(len(a) for a in alerts_db.values()) >= MAX_ALERTS_PER_USER:
+                    raise OverflowError(
+                        f"Maximum active alerts reached ({MAX_ALERTS_PER_USER})"
+                    )
+
+            alert = {
+                "type": "o",
+                "indicator": "ORB",
+                "comparison": direction,
+                "params": orb_params,
+                "state": {},
+                "trigger": trigger,
+            }
+            if pair in alerts_db:
+                alerts_db[pair].append(alert)
+            else:
+                alerts_db[pair] = [alert]
+            configuration.update_alerts(alerts_db)
+
+            p = ORBParams.from_dict(orb_params)
+            tz = f"UTC{p.timezone_offset:+d}"
+            return (
+                f"ORB alert activated for {pair}!\n"
+                f"Range: {p.range_minutes}m | Session: {p.session_start} {tz} | "
+                f"Direction: {direction} | Target: {int(p.target_pct)}% of range width"
+            )
+        except Exception as exc:
+            return f"Could not create ORB alert:\n{exc}"
+
     def process_cancel_alert(self, user_id: str, message_text: str) -> str:
         try:
             pair, alert_index = self.bot.split_message(message_text)
@@ -216,16 +286,26 @@ class AlertCommandHandler:
                 output += f"{ticker}:\n"
                 for index, alert in enumerate(alerts_db[ticker]):
                     line = f"  {index + 1} - {alert['indicator']} "
-                    if "output_value" in alert:
+                    if alert.get("type") == "o":
+                        p = alert.get("params", {})
+                        line += (
+                            f"{p.get('range_minutes', 5)}m range "
+                            f"UTC{p.get('timezone_offset', -4):+d} @{p.get('session_start', '09:30')} "
+                            f"{alert['comparison']} "
+                        )
+                    elif "output_value" in alert:
                         line += f"({alert['output_value']}) "
                     if "interval" in alert:
                         line += f"{alert['interval']} "
-                    line += f"{alert['comparison']} "
-                    if alert["comparison"] in ["PCTCHG", "24HRCHG"]:
+                    if alert.get("type") != "o":
+                        line += f"{alert['comparison']} "
+                    if alert.get("type") == "s" and alert["comparison"] in ["PCTCHG", "24HRCHG"]:
                         line += f"{alert['target'] * 100}% FROM {alert['entry']}"
-                    else:
+                    elif alert.get("type") != "o" and "target" in alert:
                         line += str(alert["target"])
-                    if alert.get("params"):
+                    elif alert.get("type") == "o":
+                        pass  # direction already in line
+                    if alert.get("params") and alert.get("type") != "o":
                         line += f" params: {alert['params']}"
                     output += line + "\n"
                 output += "\n"

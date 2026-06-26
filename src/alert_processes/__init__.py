@@ -2,6 +2,7 @@
 from .base import BaseAlertProcess
 from .cex import CEXAlertProcess
 from .technical import TechnicalAlertProcess
+from .orb import ORBAlertProcess
 
 
 """
